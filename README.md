@@ -17,7 +17,7 @@ When the script runs the first time, it is normal that the terminal font looks u
 Just execute setup.sh and show will start:
 
 ```bash
-$ bash make-debian-look-like-ubuntu.sh
+$ bash make-debian-look-like-ubuntu_rev.sh
 ```
 
 ![Ubuntuish Debian 13 Gnome Desktop](screenshot/screenshot1.png "Ubuntuish Debian 13 Gnome Desktop")

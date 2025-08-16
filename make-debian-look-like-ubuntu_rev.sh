@@ -2,8 +2,7 @@
 
 # Title: make-debian-look-like-ubuntu.sh
 # Description: This script performs all necessary steps to make a Debian Gnome
-# desktop look like an Ubuntu desktop. Also it installs flatpak with 
-# flathub.org repository enabled and Firefox from there.
+# desktop look like an Ubuntu desktop.
 # Author: DeltaLima
 # Date: 23.08.2025
 # Version: 1.1
@@ -31,6 +30,41 @@
 # 
 #
 
+# -----------------------------------------------------------------------------
+# Add-on: Idempotent Yaru-from-source installer (integrated organically).
+# Invoked after sources.list validation and apt update to ensure deb-src exists.
+# -----------------------------------------------------------------------------
+install_yaru_from_source_idempotent() {
+  # Skip if system-wide Yaru already present
+  local THEME_DIR="/usr/share/themes/Yaru"
+  local ICON_DIR="/usr/share/icons/Yaru"
+  local YARU_SRC_DIR="${HOME}/yaru"
+
+  if [ -d "${THEME_DIR}" ] && [ -d "${ICON_DIR}" ]; then
+    return 0
+  fi
+
+  # Ensure git
+  if ! command -v git >/dev/null 2>&1; then
+    sudo apt install -y git
+  fi
+
+  # Ensure build dependencies (requires deb-src enabled)
+  sudo apt build-dep -y yaru-theme || true
+
+  # Clone or update source
+  if [ ! -d "${YARU_SRC_DIR}/.git" ]; then
+    git clone https://github.com/ubuntu/yaru "${YARU_SRC_DIR}"
+  else
+    git -C "${YARU_SRC_DIR}" pull --ff-only
+  fi
+
+  # Build & install
+  ( cd "${YARU_SRC_DIR}" && ./bootstrap.sh -b )
+}
+# -----------------------------------------------------------------------------
+
+
 arguments="$@"
 
 # define the $packages[] array
@@ -41,18 +75,16 @@ declare -A packages
 # install base desktop stuff
 packages[0-base]="plymouth ecryptfs-utils curl wget python-is-python3 binutils" 
 
-# install desktop base
+# install desktop base (Flatpak and Thunderbird removed)
 packages[1-desktop-base]="ttf-mscorefonts-installer fonts-ubuntu fonts-ubuntu-console fonts-liberation2
 fonts-noto-core fonts-noto-color-emoji fonts-dejavu fonts-hack
-flatpak flatpak-xdg-utils gnome-software-plugin-flatpak network-manager-openvpn-gnome
-dconf-editor thunderbird"
+network-manager-openvpn-gnome
+dconf-editor"
 
-# install gnome base
+# install gnome base (yaru-theme-* removed; Yaru comes from source)
 packages[2-desktop-gnome]="gnome-shell-extension-manager gnome-tweaks gnome-shell-extensions 
 gnome-shell-extension-desktop-icons-ng gnome-shell-extension-dashtodock
 gnome-shell-extension-appindicator gnome-shell-extension-system-monitor 
-yaru-theme-gnome-shell yaru-theme-gtk yaru-theme-icon yaru-theme-sound
-yaru-theme-unity
 gnome-package-updater gnome-packagekit"
 
 # if you want to add for automation purposes your own packages, just add another array field, like
@@ -175,6 +207,9 @@ EOF
   sudo apt update
 fi
 
+# Ensure Yaru from source is present (after sources.list handling)
+message "Ensure Yaru theme (source) is installed if missing"
+install_yaru_from_source_idempotent
 
 # iterate through $packages
 for category in $package_categories
@@ -206,30 +241,9 @@ do
       ;;
 
     1-desktop-base)
-      message "add flathub.org flatpak repository"
-      sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || error
-      
-      # here was also com.github.GradienceTeam.Gradience included installed, but not needed
-      # anymore - i found the relevant ~/.config/gtk-{3,4}.0/gtk.css file ;) 
-      message "install firefox flatpak"
-      sudo flatpak install org.mozilla.firefox || error
-      message "set firefox flatpak to default"
-      xdg-settings set default-web-browser org.mozilla.firefox.desktop 
-      
-      message "apply font fix for firefox flatpak"
-      mkdir -p $HOME/.var/app/org.mozilla.firefox/config/fontconfig/
-      cat << EOF > $HOME/.var/app/org.mozilla.firefox/config/fontconfig/fonts.conf
-<?xml version='1.0'?>
-<!DOCTYPE fontconfig SYSTEM 'fonts.dtd'>
-<fontconfig>
-    <!-- Disable bitmap fonts. -->
-    <selectfont><rejectfont><pattern>
-        <patelt name="scalable"><bool>false</bool></patelt>
-    </pattern></rejectfont></selectfont>
-</fontconfig>
-EOF
-      
-      # fix big cursor issue in qt apps
+      # Flatpak-related steps removed
+
+      # fix big cursor issue in qt apps (kept; not flatpak-related)
       message "Set XCURSOR_SIZE=24 in /etc/environment to fix Big cursor bug in QT"
       grep "XCURSOR_SIZE" /etc/environment || echo "XCURSOR_SIZE=24" | sudo tee -a /etc/environment > /dev/null
       ;;
@@ -241,9 +255,6 @@ EOF
       
       message "enable gnome shell extensions"
       gnome-extensions enable ubuntu-appindicators@ubuntu.com
-      
-      # panel-osd does no longer exist in debian 13
-      #gnome-extensions enable panel-osd@berend.de.schouwer.gmail.com
       gnome-extensions enable user-theme@gnome-shell-extensions.gcampax.github.com
       gnome-extensions enable dash-to-dock@micxgx.gmail.com
       gnome-extensions enable ding@rastersoft.com
@@ -265,7 +276,6 @@ EOF
       gsettings set org.gnome.shell.extensions.dash-to-dock running-indicator-style 'DOTS'
       gsettings set org.gnome.shell.extensions.dash-to-dock icon-size-fixed true
       
-      
       message "apply settings for gnome desktop"
       # desktop
       gsettings set org.gnome.desktop.background picture-uri 'file:///usr/share/backgrounds/gnome/amber-l.jxl'
@@ -284,9 +294,6 @@ EOF
       gsettings set org.gnome.desktop.interface cursor-theme 'Yaru'
       gsettings set org.gnome.desktop.interface gtk-theme 'Yaru-dark'
       gsettings set org.gnome.desktop.interface icon-theme 'Yaru-dark'
-
-      # yaru gnome-shell theme is a bit broken actually, system osd network ellapse button glitched
-      # gsettings set org.gnome.shell.extensions.user-theme name 'Yaru-dark'
 
       # set accent color to orange
       gsettings set org.gnome.desktop.interface accent-color 'orange'
@@ -307,20 +314,7 @@ EOF
 @define-color accent_fg_color #ffffff;
 EOF
 
-      # replace firefox-esr with flatpak in dock
-      message "replace firefox-esr with flatpak in dock"
-      gsettings get org.gnome.shell favorite-apps | grep "org.mozilla.firefox.desktop" > /dev/null ||
-      gsettings set org.gnome.shell favorite-apps "$(gsettings get  org.gnome.shell favorite-apps  | sed 's/firefox-esr\.desktop/org\.mozilla\.firefox\.desktop/')"
-
-      # replace evolution with thunderbird in dock
-      message "replace evolution with thunderbird in dock"
-      gsettings get org.gnome.shell favorite-apps | grep "thunderbird.desktop" > /dev/null ||
-      gsettings set org.gnome.shell favorite-apps "$(gsettings get  org.gnome.shell favorite-apps  | sed 's/org\.gnome\.Evolution\.desktop/thunderbird\.desktop/')"
-
-      # replace yelp with settings in dock
-      message "replace yelp with settings in dock"
-      gsettings get org.gnome.shell favorite-apps | grep "org.gnome.Settings.desktop" > /dev/null ||
-      gsettings set org.gnome.shell favorite-apps "$(gsettings get  org.gnome.shell favorite-apps  | sed 's/yelp\.desktop/org\.gnome\.Settings\.desktop/')"
+      # Dock modifications related to Firefox Flatpak and Thunderbird/Evolution removed
       ;;
   esac
   
